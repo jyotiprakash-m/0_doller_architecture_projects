@@ -1,0 +1,52 @@
+erDiagram
+    USERS {
+        text id PK
+        text email
+        text hashed_password
+        integer credits
+        text created_at
+    }
+
+    DOCUMENTS {
+        text id PK
+        text user_id FK
+        text filename
+        text file_type
+        integer file_size
+        text file_path
+        text status
+        integer page_count
+        integer chunk_count
+        text uploaded_at
+        text updated_at
+    }
+
+    AUDIT_REPORTS {
+        text id PK
+        text document_id FK
+        text user_id FK
+        text audit_type
+        text status
+        text executive_summary
+        text overall_risk_score
+        real compliance_score
+        text findings_json
+        text key_clauses_json
+        text created_at
+        text completed_at
+    }
+
+    CHAT_HISTORY {
+        text id PK
+        text user_id FK
+        text role
+        text content
+        text sources_json
+        text document_ids_json
+        text created_at
+    }
+
+    USERS ||--o{ DOCUMENTS : "uploads"
+    USERS ||--o{ AUDIT_REPORTS : "owns"
+    USERS ||--o{ CHAT_HISTORY : "participates"
+    DOCUMENTS ||--o{ AUDIT_REPORTS : "analyzed_in"
