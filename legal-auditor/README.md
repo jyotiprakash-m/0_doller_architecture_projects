@@ -33,6 +33,128 @@ A production-grade SaaS application that audits legal documents using AI — wit
 
 ---
 
+## 🏛️ System Architecture
+
+```mermaid
+graph TD
+    %% Define Styles
+    classDef frontend fill:#E3F2FD,stroke:#1565C0,stroke-width:2px;
+    classDef backend fill:#E8F5E9,stroke:#2E7D32,stroke-width:2px;
+    classDef ai fill:#FFF3E0,stroke:#EF6C00,stroke-width:2px;
+    classDef db fill:#F3E5F5,stroke:#6A1B9A,stroke-width:2px;
+
+    %% Components
+    subgraph Frontend [Frontend Dashboard Client]
+        UI[Web UI - HTML/JS/CSS]
+    end
+
+    subgraph BackendAPI [FastAPI Backend Server]
+        R_Docs[Documents Router]
+        R_Audit[Audit Router]
+        R_Chat[Chat Router]
+        DocProc[Document Processor]
+        RAG[RAG Engine - LlamaIndex]
+    end
+
+    subgraph Databases [Local Storage]
+        SQLite[(SQLite DB)]
+        ChromaDB[(ChromaDB Vector Store)]
+    end
+
+    subgraph LocalAI [Ollama Local AI Engine]
+        EmbedModel[Nomic-Embed-Text Model]
+        LLM[Mistral LLM Model]
+    end
+
+    %% Frontend to Backend Connections
+    UI -- "POST /api/documents/upload" --> R_Docs
+    UI -- "GET /api/audit/{id}" --> R_Audit
+    UI -- "POST /api/chat" --> R_Chat
+
+    %% Internal Backend Flow (Document Upload)
+    R_Docs -- "Extracts & Chunks" --> DocProc
+    DocProc -- "Saves metadata" --> SQLite
+    DocProc -- "Passes chunks" --> RAG
+
+    %% RAG Engine to AI Models & DBs
+    RAG -- "Generates Embeddings" --> EmbedModel
+    RAG -- "Stores Vectors" --> ChromaDB
+    
+    %% Internal Backend Flow (Audit / Chat)
+    R_Audit & R_Chat -- "Queries context" --> RAG
+    RAG -- "Fetches similar chunks" --> ChromaDB
+    RAG -- "Injects prompt & context" --> LLM
+    LLM -- "Generates Response" --> R_Audit
+    LLM -- "Generates Response" --> R_Chat
+
+    %% Apply Styles
+    class UI frontend;
+    class R_Docs,R_Audit,R_Chat,DocProc,RAG backend;
+    class SQLite,ChromaDB db;
+    class EmbedModel,LLM ai;
+```
+
+---
+
+## 📊 Database ERD
+
+```mermaid
+erDiagram
+    USERS {
+        text id PK
+        text email
+        text hashed_password
+        integer credits
+        text created_at
+    }
+
+    DOCUMENTS {
+        text id PK
+        text user_id FK
+        text filename
+        text file_type
+        integer file_size
+        text file_path
+        text status
+        integer page_count
+        integer chunk_count
+        text uploaded_at
+        text updated_at
+    }
+
+    AUDIT_REPORTS {
+        text id PK
+        text document_id FK
+        text user_id FK
+        text audit_type
+        text status
+        text executive_summary
+        text overall_risk_score
+        real compliance_score
+        text findings_json
+        text key_clauses_json
+        text created_at
+        text completed_at
+    }
+
+    CHAT_HISTORY {
+        text id PK
+        text user_id FK
+        text role
+        text content
+        text sources_json
+        text document_ids_json
+        text created_at
+    }
+
+    USERS ||--o{ DOCUMENTS : "uploads"
+    USERS ||--o{ AUDIT_REPORTS : "owns"
+    USERS ||--o{ CHAT_HISTORY : "participates"
+    DOCUMENTS ||--o{ AUDIT_REPORTS : "analyzed_in"
+```
+
+---
+
 ## 📋 Prerequisites
 
 Before you begin, make sure you have the following installed:
