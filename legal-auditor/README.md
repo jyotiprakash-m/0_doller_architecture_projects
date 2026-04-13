@@ -33,7 +33,9 @@ A production-grade SaaS application that audits legal documents using AI — wit
 
 ---
 
-## 🏛️ System Architecture
+## 🏗️ System Architecture
+
+![System Architecture](./architecture.png)
 
 ```mermaid
 graph TD
