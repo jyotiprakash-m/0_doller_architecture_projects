@@ -1,0 +1,51 @@
+# ============================================
+# LegalShield AI — Git Ignore
+# ============================================
+
+# --- Environment & Secrets ---
+.env
+*.env.local
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+venv/
+.venv/
+env/
+*.egg-info/
+dist/
+build/
+
+# --- Data & Storage (local only, never commit) ---
+*.db
+*.sqlite
+*.sqlite3
+chromadb_storage/
+data/
+
+# --- Node / Frontend ---
+node_modules/
+package-lock.json
+
+# --- OS Files ---
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+
+# --- IDE ---
+.vscode/
+.idea/
+*.code-workspace
+
+# --- Logs ---
+*.log
+
+# --- Uploads & Generated Reports ---
+backend/data/
+backend/chromadb_storage/
+backend/legal_auditor.db
+Audit_Report_*.pdf

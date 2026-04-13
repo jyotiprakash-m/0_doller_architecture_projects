@@ -1,0 +1,56 @@
+graph TD
+    %% Define Styles
+    classDef frontend fill:#E3F2FD,stroke:#1565C0,stroke-width:2px;
+    classDef backend fill:#E8F5E9,stroke:#2E7D32,stroke-width:2px;
+    classDef ai fill:#FFF3E0,stroke:#EF6C00,stroke-width:2px;
+    classDef db fill:#F3E5F5,stroke:#6A1B9A,stroke-width:2px;
+
+    %% Components
+    subgraph Frontend [Frontend Dashboard Client]
+        UI[Web UI - HTML/JS/CSS]
+    end
+
+    subgraph BackendAPI [FastAPI Backend Server]
+        R_Docs[Documents Router]
+        R_Audit[Audit Router]
+        R_Chat[Chat Router]
+        DocProc[Document Processor]
+        RAG[RAG Engine - LlamaIndex]
+    end
+
+    subgraph Databases [Local Storage]
+        SQLite[(SQLite DB)]
+        ChromaDB[(ChromaDB Vector Store)]
+    end
+
+    subgraph LocalAI [Ollama Local AI Engine]
+        EmbedModel[Nomic-Embed-Text Model]
+        LLM[Mistral LLM Model]
+    end
+
+    %% Frontend to Backend Connections
+    UI -- "POST /api/documents/upload" --> R_Docs
+    UI -- "GET /api/audit/{id}" --> R_Audit
+    UI -- "POST /api/chat" --> R_Chat
+
+    %% Internal Backend Flow (Document Upload)
+    R_Docs -- "Extracts & Chunks" --> DocProc
+    DocProc -- "Saves metadata" --> SQLite
+    DocProc -- "Passes chunks" --> RAG
+
+    %% RAG Engine to AI Models & DBs
+    RAG -- "Generates Embeddings" --> EmbedModel
+    RAG -- "Stores Vectors" --> ChromaDB
+    
+    %% Internal Backend Flow (Audit / Chat)
+    R_Audit & R_Chat -- "Queries context" --> RAG
+    RAG -- "Fetches similar chunks" --> ChromaDB
+    RAG -- "Injects prompt & context" --> LLM
+    LLM -- "Generates Response" --> R_Audit
+    LLM -- "Generates Response" --> R_Chat
+
+    %% Apply Styles
+    class UI frontend;
+    class R_Docs,R_Audit,R_Chat,DocProc,RAG backend;
+    class SQLite,ChromaDB db;
+    class EmbedModel,LLM ai;

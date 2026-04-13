@@ -1,0 +1,49 @@
+# ============================================
+# Workspace Root — Git Ignore
+# Covers multiple projects (Python, Node, etc.)
+# ============================================
+
+# --- Environment & Secrets ---
+.env
+*.env.local
+.env.production
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+venv/
+.venv/
+env/
+*.egg-info/
+dist/
+build/
+
+# --- Node / Frontend ---
+node_modules/
+package-lock.json
+
+# --- Data & Storage ---
+*.db
+*.sqlite
+*.sqlite3
+chromadb_storage/
+
+# --- OS Files ---
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+
+# --- IDE ---
+.vscode/
+.idea/
+*.code-workspace
+
+# --- Logs ---
+*.log
+
+# --- Generated Reports ---
+Audit_Report_*.pdf
