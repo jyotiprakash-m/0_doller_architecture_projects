@@ -1,0 +1,15 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+venv/
+.env
+
+# Data & DB files
+data/
+*.db
+*.duckdb
+
+# Logs
+*.log

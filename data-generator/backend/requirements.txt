@@ -1,0 +1,21 @@
+fastapi==0.115.0
+uvicorn==0.30.0
+python-multipart==0.0.9
+pydantic==2.9.0
+pydantic[email]
+python-dotenv
+
+# Local LLM via Ollama
+llama-index-llms-ollama==0.3.0
+
+# Data storage
+duckdb>=0.10.0
+
+# Data generation
+faker>=25.0.0
+
+# Auth
+bcrypt
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+langgraph
