@@ -1,0 +1,12 @@
+fastapi
+uvicorn
+sqlalchemy
+pydantic
+crewai[tools]
+duckduckgo-search==6.2.1
+langchain
+langchain-community
+setuptools<70.0.0
+fpdf2
+tavily-python
+python-dotenv
