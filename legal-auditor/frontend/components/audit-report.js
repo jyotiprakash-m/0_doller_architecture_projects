@@ -225,7 +225,12 @@ function copySummary(text) {
 
 async function downloadReport(docId) {
     try {
-        const response = await fetch(`${API_BASE}/api/audit/${docId}/download`);
+        const token = localStorage.getItem('ls_token');
+        const response = await fetch(`${API_BASE}/api/audit/${docId}/download`, {
+            headers: {
+                'Authorization': `Bearer ${token}`
+            }
+        });
         if (!response.ok) throw new Error('Download failed');
         
         const blob = await response.blob();

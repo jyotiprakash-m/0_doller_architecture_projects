@@ -7,6 +7,7 @@ from services import db
 from services.document_processor import extract_text
 from services.audit_engine import audit_engine
 from services.auth_utils import get_current_user_id
+from services.pdf_generator import generate_audit_pdf
 from fastapi import APIRouter, HTTPException, Response, Depends
 
 logger = logging.getLogger(__name__)
