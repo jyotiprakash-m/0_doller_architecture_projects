@@ -1,0 +1,33 @@
+"""
+Database configuration and session management for Ghost-Editor.
+Using SQLAlchemy with SQLite.
+"""
+from sqlalchemy import create_engine
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker
+from config import DATABASE_URL
+
+# Create engine
+# connect_args={"check_same_thread": False} is required for SQLite and FastAPI
+engine = create_engine(
+    DATABASE_URL, connect_args={"check_same_thread": False}
+)
+
+# Create SessionLocal class
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+# Create Base class
+Base = declarative_base()
+
+# Dependency to get DB session
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+def init_db():
+    """Initialize the database by creating all tables."""
+    import models  # Ensure models are imported so they are registered with Base
+    Base.metadata.create_all(bind=engine)
