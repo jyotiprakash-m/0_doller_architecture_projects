@@ -1,0 +1,50 @@
+# ============================================
+# SupportSim AI — Python Dependencies
+# ============================================
+
+# --- Core Framework ---
+fastapi==0.115.0
+uvicorn==0.30.0
+python-multipart==0.0.9
+pydantic>=2.13.0
+pydantic[email]
+python-dotenv
+
+# --- Authentication ---
+passlib[bcrypt]==1.7.4
+bcrypt==4.0.1
+python-jose[cryptography]==3.3.0
+
+# --- RAG Pipeline (LlamaIndex + ChromaDB + Ollama) ---
+llama-index==0.11.0
+llama-index-llms-ollama==0.3.0
+llama-index-embeddings-ollama==0.3.0
+llama-index-vector-stores-chroma==0.2.0
+llama-index-retrievers-bm25
+rank_bm25
+chromadb==0.5.0
+
+# --- Agent Orchestration (LangGraph) ---
+langgraph
+langchain
+langchain-community
+langchain-ollama
+
+# --- Document Processing ---
+pypdf>=4.0.1,<5.0.0
+python-docx==1.1.0
+
+# --- SaaS Billing ---
+stripe==10.11.0
+
+# --- Frontend ---
+streamlit>=1.38.0
+
+# --- Utilities ---
+setuptools<70.0.0
+nest_asyncio
+
+# --- Testing ---
+pytest==8.3.3
+pytest-asyncio==0.24.0
+httpx==0.27.0

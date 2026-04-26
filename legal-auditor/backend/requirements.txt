@@ -35,6 +35,11 @@ faker>=25.0.0
 stripe==10.11.0
 langgraph
 
+# --- Customer Support Training Platform ---
+langchain-ollama
+streamlit>=1.38.0
+httpx==0.27.0
+
 # Testing
 pytest==8.3.3
 pytest-asyncio==0.24.0
