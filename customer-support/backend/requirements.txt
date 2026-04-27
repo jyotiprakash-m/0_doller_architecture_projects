@@ -43,6 +43,7 @@ streamlit>=1.38.0
 # --- Utilities ---
 setuptools<70.0.0
 nest_asyncio
+confluent-kafka==2.3.0
 
 # --- Testing ---
 pytest==8.3.3

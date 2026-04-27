@@ -1,11 +1,11 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { APIClient } from '@/lib/api';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/Card';
-import { BookOpen, Trash2, UploadCloud, FileText, CheckCircle, Clock } from 'lucide-react';
+import { BookOpen, Trash2, UploadCloud, FileText, CheckCircle, Clock, Loader2 } from 'lucide-react';
 
 export default function KnowledgeBasePage() {
   const [kbs, setKbs] = useState<any[]>([]);
@@ -14,6 +14,14 @@ export default function KnowledgeBasePage() {
   const [isCreating, setIsCreating] = useState(false);
   const [docsMap, setDocsMap] = useState<Record<string, any[]>>({});
   const [uploadingKbId, setUploadingKbId] = useState<string | null>(null);
+  const pollingRef = useRef<Record<string, NodeJS.Timeout>>({});
+
+  // Cleanup polling intervals on unmount
+  useEffect(() => {
+    return () => {
+      Object.values(pollingRef.current).forEach(clearInterval);
+    };
+  }, []);
 
   useEffect(() => {
     fetchKbs();
@@ -33,6 +41,12 @@ export default function KnowledgeBasePage() {
     try {
       const docs = await APIClient.get<any[]>(`/api/kb/${kbId}/documents`);
       setDocsMap(prev => ({ ...prev, [kbId]: docs }));
+
+      // Auto-start polling if any document is still processing
+      const hasProcessing = docs.some(d => d.status === 'processing');
+      if (hasProcessing) {
+        startPolling(kbId);
+      }
     } catch (e) {
       console.error(e);
     }
@@ -64,6 +78,30 @@ export default function KnowledgeBasePage() {
     }
   };
 
+  const startPolling = useCallback((kbId: string) => {
+    // Don't create duplicate pollers for the same KB
+    if (pollingRef.current[kbId]) return;
+
+    const interval = setInterval(async () => {
+      try {
+        const docs = await APIClient.get<any[]>(`/api/kb/${kbId}/documents`);
+        setDocsMap(prev => ({ ...prev, [kbId]: docs }));
+
+        // Stop polling if all docs are indexed or errored (no more "processing")
+        const hasProcessing = docs.some(d => d.status === 'processing');
+        if (!hasProcessing) {
+          clearInterval(interval);
+          delete pollingRef.current[kbId];
+          fetchKbs(); // refresh doc counts
+        }
+      } catch (e) {
+        console.error(e);
+      }
+    }, 5000); // Poll every 5 seconds
+
+    pollingRef.current[kbId] = interval;
+  }, []);
+
   const handleUpload = async (kbId: string, e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -75,13 +113,15 @@ export default function KnowledgeBasePage() {
     try {
       await APIClient.post(`/api/kb/${kbId}/upload`, formData, true);
       fetchDocs(kbId);
-      fetchKbs(); // to update doc count
+      fetchKbs();
+      // Start polling for status updates (processing → indexed)
+      startPolling(kbId);
     } catch (err) {
       console.error(err);
       alert('Failed to upload document');
     } finally {
       setUploadingKbId(null);
-      if (e.target) e.target.value = ''; // reset input
+      if (e.target) e.target.value = '';
     }
   };
 
@@ -187,30 +227,50 @@ export default function KnowledgeBasePage() {
                     <li className="p-4 text-center text-sm text-slate-500">No documents uploaded yet.</li>
                   ) : (
                     docsMap[kb.id]?.map((doc) => (
-                      <li key={doc.id} className="p-4 flex items-center justify-between hover:bg-slate-800/30 transition-colors">
-                        <div className="flex items-center space-x-3">
-                          <FileText className="h-5 w-5 text-slate-400" />
-                          <div>
-                            <p className="text-sm font-medium text-slate-200">{doc.filename}</p>
-                            <div className="flex items-center space-x-2 text-xs text-slate-500 mt-1">
-                              <span>{(doc.file_size / 1024).toFixed(1)} KB</span>
-                              <span>·</span>
-                              <span>{doc.chunk_count || 0} chunks</span>
-                              <span>·</span>
-                              {doc.status === 'indexed' ? (
-                                <span className="flex items-center text-emerald-500"><CheckCircle className="h-3 w-3 mr-1" /> Indexed</span>
-                              ) : (
-                                <span className="flex items-center text-amber-500"><Clock className="h-3 w-3 mr-1" /> Processing</span>
-                              )}
+                      <li key={doc.id} className="p-4 hover:bg-slate-800/30 transition-colors">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center space-x-3">
+                            <FileText className="h-5 w-5 text-slate-400" />
+                            <div>
+                              <p className="text-sm font-medium text-slate-200">{doc.filename}</p>
+                              <div className="flex items-center space-x-2 text-xs text-slate-500 mt-1">
+                                <span>{(doc.file_size / 1024).toFixed(1)} KB</span>
+                                <span>·</span>
+                                <span>{doc.chunk_count || 0} chunks</span>
+                                <span>·</span>
+                                {doc.status === 'indexed' ? (
+                                  <span className="flex items-center text-emerald-500"><CheckCircle className="h-3 w-3 mr-1" /> Indexed</span>
+                                ) : doc.status === 'error' ? (
+                                  <span className="flex items-center text-red-500"><Clock className="h-3 w-3 mr-1" /> Error</span>
+                                ) : (
+                                  <span className="flex items-center text-amber-500"><Loader2 className="h-3 w-3 mr-1 animate-spin" /> Processing {doc.progress || 0}%</span>
+                                )}
+                              </div>
                             </div>
                           </div>
+                          <button
+                            onClick={() => handleDeleteDoc(kb.id, doc.id)}
+                            className="p-2 text-slate-500 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
                         </div>
-                        <button
-                          onClick={() => handleDeleteDoc(kb.id, doc.id)}
-                          className="p-2 text-slate-500 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </button>
+                        {doc.status === 'processing' && (
+                          <div className="mt-3 ml-8">
+                            <div className="w-full bg-slate-700/50 rounded-full h-1.5 overflow-hidden">
+                              <div
+                                className="bg-gradient-to-r from-amber-500 to-emerald-500 h-1.5 rounded-full transition-all duration-700 ease-out"
+                                style={{ width: `${doc.progress || 0}%` }}
+                              />
+                            </div>
+                            <p className="text-[10px] text-slate-500 mt-1">
+                              {(doc.progress || 0) < 20 ? 'Extracting text...' :
+                               (doc.progress || 0) < 25 ? 'Chunking document...' :
+                               (doc.progress || 0) < 85 ? 'AI extracting keywords & summaries...' :
+                               (doc.progress || 0) < 95 ? 'Embedding vectors...' : 'Finalizing...'}
+                            </p>
+                          </div>
+                        )}
                       </li>
                     ))
                   )}

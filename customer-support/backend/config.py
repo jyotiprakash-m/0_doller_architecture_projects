@@ -37,6 +37,10 @@ ALLOWED_EXTENSIONS = {".pdf", ".docx", ".txt", ".md"}
 # ChromaDB collection name
 CHROMA_COLLECTION = "support_knowledge_bases"
 
+# Kafka Settings
+KAFKA_BOOTSTRAP_SERVERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
+KAFKA_TOPIC_DOCUMENT_INDEXING = os.getenv("KAFKA_TOPIC_DOCUMENT_INDEXING", "document-indexing-tasks")
+
 # API settings
 API_HOST = os.getenv("API_HOST", "0.0.0.0")
 API_PORT = int(os.getenv("API_PORT", "8000"))  # Different port from legal-auditor

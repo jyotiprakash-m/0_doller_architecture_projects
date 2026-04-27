@@ -150,6 +150,11 @@ def init_db():
     except sqlite3.OperationalError:
         pass  # Columns likely already exist
 
+    try:
+        cursor.execute("ALTER TABLE kb_documents ADD COLUMN progress INTEGER DEFAULT 0")
+    except sqlite3.OperationalError:
+        pass  # Column already exists
+
     conn.commit()
     conn.close()
 
@@ -327,11 +332,19 @@ def update_kb_document_status(doc_id: str, status: str, chunk_count: int = None)
     conn = get_connection()
     if chunk_count is not None:
         conn.execute(
-            "UPDATE kb_documents SET status = ?, chunk_count = ? WHERE id = ?",
+            "UPDATE kb_documents SET status = ?, chunk_count = ?, progress = 100 WHERE id = ?",
             (status, chunk_count, doc_id)
         )
     else:
         conn.execute("UPDATE kb_documents SET status = ? WHERE id = ?", (status, doc_id))
+    conn.commit()
+    conn.close()
+
+
+def update_kb_document_progress(doc_id: str, progress: int):
+    """Update KB document indexing progress (0-100)."""
+    conn = get_connection()
+    conn.execute("UPDATE kb_documents SET progress = ? WHERE id = ?", (progress, doc_id))
     conn.commit()
     conn.close()
 

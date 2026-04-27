@@ -72,28 +72,48 @@ async def upload_document(kb_id: str, file: UploadFile = File(...),
     with open(file_path, "wb") as f:
         f.write(content)
 
-    # Create DB record
+    # Create DB record (set status to processing)
     doc = db.create_kb_document(
         kb_id=kb_id, user_id=user_id, filename=file.filename,
         file_type=ext, file_size=len(content), file_path=str(file_path),
     )
+    db.update_kb_document_status(doc["id"], "processing")
+    db.update_kb_doc_count(kb_id, delta=1)
 
-    # Extract text and index via RAG
+    # Publish to Kafka
     try:
-        text, page_count = extract_text(str(file_path))
-        chunk_count = rag_engine.add_document(
-            doc_id=doc["id"], user_id=user_id, kb_id=kb_id,
-            text=text, filename=file.filename,
-        )
-        db.update_kb_document_status(doc["id"], "indexed", chunk_count)
-        db.update_kb_doc_count(kb_id, delta=1)
-        logger.info(f"Document indexed: {file.filename} → {chunk_count} chunks")
-    except Exception as e:
-        db.update_kb_document_status(doc["id"], "error")
-        logger.error(f"Failed to index document: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to process document: {str(e)}")
+        from confluent_kafka import Producer
+        import json
+        from config import KAFKA_BOOTSTRAP_SERVERS, KAFKA_TOPIC_DOCUMENT_INDEXING
 
-    return {**doc, "chunk_count": chunk_count, "status": "indexed"}
+        producer = Producer({"bootstrap.servers": KAFKA_BOOTSTRAP_SERVERS})
+        
+        task_payload = {
+            "doc_id": doc["id"],
+            "kb_id": kb_id,
+            "user_id": user_id,
+            "file_path": str(file_path),
+            "filename": file.filename
+        }
+        
+        producer.produce(
+            KAFKA_TOPIC_DOCUMENT_INDEXING, 
+            key=doc["id"], 
+            value=json.dumps(task_payload).encode("utf-8")
+        )
+        producer.flush()
+        
+        logger.info(f"Published document indexing task to Kafka: {file.filename} ({doc['id']})")
+    except Exception as e:
+        logger.error(f"Failed to publish Kafka message: {e}")
+        db.update_kb_document_status(doc["id"], "error")
+        raise HTTPException(status_code=500, detail="Failed to queue document for processing.")
+
+    from fastapi.responses import JSONResponse
+    return JSONResponse(
+        status_code=202,
+        content={**doc, "status": "processing", "message": "Document queued for background indexing."}
+    )
 
 
 @router.get("/{kb_id}/documents")

@@ -18,7 +18,6 @@ from llama_index.core.node_parser import SentenceSplitter, HierarchicalNodeParse
 from llama_index.core.retrievers import AutoMergingRetriever, QueryFusionRetriever
 from llama_index.retrievers.bm25 import BM25Retriever
 from llama_index.core.postprocessor import LLMRerank
-from llama_index.core.extractors import SummaryExtractor, KeywordExtractor
 from llama_index.vector_stores.chroma import ChromaVectorStore
 from llama_index.llms.ollama import Ollama
 from llama_index.embeddings.ollama import OllamaEmbedding
@@ -51,7 +50,6 @@ class RAGEngine:
         self._chroma_client = None
         self._collection = None
         self._node_parser = None
-        self._metadata_extractor = None
         self._initialized = False
 
     def initialize(self):
@@ -87,11 +85,7 @@ class RAGEngine:
                 chunk_sizes=[2048, 512, 128]
             )
 
-            # 2. Metadata Extractor for Point 5
-            self._metadata_extractor = [
-                SummaryExtractor(summaries=["self"], llm=llm),
-                KeywordExtractor(keywords=5, llm=llm),
-            ]
+            # Metadata extraction now done via direct LLM calls in add_document()
 
             # Initialize ChromaDB (persistent local storage)
             self._chroma_client = chromadb.PersistentClient(path=str(CHROMADB_DIR))
@@ -120,10 +114,11 @@ class RAGEngine:
             raise
 
     def add_document(self, doc_id: str, user_id: str, kb_id: str,
-                     text: str, filename: str) -> int:
+                     text: str, filename: str, progress_callback=None) -> int:
         """
         Add a document to the vector store with KB isolation.
         Returns the number of chunks created.
+        progress_callback: optional callable(int) that receives progress 0-100.
         """
         if not self._initialized:
             self.initialize()
@@ -144,12 +139,53 @@ class RAGEngine:
         nodes = self._node_parser.get_nodes_from_documents([document])
         leaf_nodes = get_leaf_nodes(nodes)
 
-        # Step 5: Sync metadata extraction (keywords + summary)
-        try:
-            for extractor in self._metadata_extractor:
-                leaf_nodes = extractor.process_nodes(leaf_nodes)
-        except Exception as e:
-            logger.warning(f"Metadata extraction skipped (non-critical): {e}")
+        if progress_callback:
+            progress_callback(25)
+
+        # Step 5: Manual sync metadata extraction (keywords + summary)
+        # LlamaIndex's Ollama client uses async httpx internally, which breaks
+        # in the Kafka worker. We call Ollama's REST API directly via requests.
+        import requests as http_requests
+        total = len(leaf_nodes)
+        for i, node in enumerate(leaf_nodes):
+            try:
+                text_snippet = node.text[:2000]
+
+                # Extract keywords via direct Ollama API call
+                kw_resp = http_requests.post(
+                    f"{OLLAMA_BASE_URL}/api/generate",
+                    json={
+                        "model": LLM_MODEL,
+                        "prompt": f"Extract 5 important keywords from this text. "
+                                  f"Return ONLY the keywords separated by commas, nothing else.\n\n"
+                                  f"Text: {text_snippet}",
+                        "stream": False
+                    },
+                    timeout=120
+                )
+                node.metadata["keywords"] = kw_resp.json().get("response", "").strip()
+
+                # Extract summary via direct Ollama API call
+                sum_resp = http_requests.post(
+                    f"{OLLAMA_BASE_URL}/api/generate",
+                    json={
+                        "model": LLM_MODEL,
+                        "prompt": f"Summarize this text in 1-2 sentences. Return ONLY the summary.\n\n"
+                                  f"Text: {text_snippet}",
+                        "stream": False
+                    },
+                    timeout=120
+                )
+                node.metadata["section_summary"] = sum_resp.json().get("response", "").strip()
+
+                # Report progress: metadata phase is 25% to 85%
+                if progress_callback:
+                    pct = 25 + int((i + 1) / total * 60)
+                    progress_callback(pct)
+
+                logger.info(f"  Metadata extracted for chunk {i+1}/{total}")
+            except Exception as e:
+                logger.warning(f"  Metadata extraction failed for chunk {i+1}/{total}: {e}")
 
         # Ensure isolation metadata propagates to each leaf node
         for node in leaf_nodes:
@@ -158,6 +194,9 @@ class RAGEngine:
             node.metadata["kb_id"] = kb_id
             node.excluded_llm_metadata_keys = ["user_id", "kb_id", "app_doc_id"]
             node.excluded_embed_metadata_keys = ["user_id", "kb_id", "app_doc_id"]
+
+        if progress_callback:
+            progress_callback(90)
 
         self._index.insert_nodes(leaf_nodes)
 
