@@ -221,8 +221,7 @@ class RAGEngine:
             filters.append(ExactMatchFilter(key="app_doc_id", value=doc_id))
 
         metadata_filters = MetadataFilters(filters=filters)
-
-        logger.info(f"Advanced RAG query with Hybrid Search and Reranking")
+        logger.info(f"RAG Query: '{question}' | Filters: {filters}")
 
         # Point 1: Base retriever
         base_retriever = self._index.as_retriever(
@@ -234,10 +233,18 @@ class RAGEngine:
         # Note: In a production app, we'd persist the BM25 index. 
         # For this MVP, we create a temporary BM25 retriever from the top-K nodes for speed.
         all_nodes = base_retriever.retrieve(question)
+        logger.info(f"Retrieved {len(all_nodes)} nodes from vector store with filters.")
         
         if not all_nodes:
+            # Try a broad search without doc_id if specific search fails (for debugging)
+            logger.warning(f"No nodes found for doc_id {doc_id}. Checking if nodes exist at all for this user/kb...")
+            debug_filters = MetadataFilters(filters=[ExactMatchFilter(key="user_id", value=user_id)])
+            debug_retriever = self._index.as_retriever(similarity_top_k=5, filters=debug_filters)
+            debug_nodes = debug_retriever.retrieve(question)
+            logger.info(f"Broad search found {len(debug_nodes)} nodes.")
+
             return {
-                "answer": "I couldn't find relevant information in this document.",
+                "answer": "I couldn't find relevant information in the knowledge base. Please ensure documents have been uploaded and indexed.",
                 "sources": []
             }
             

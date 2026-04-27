@@ -141,6 +141,103 @@ async def delete_document(kb_id: str, doc_id: str, user_id: str = Depends(get_cu
     return {"status": "deleted", "doc_id": doc_id}
 
 
+class UrlUploadRequest(BaseModel):
+    url: str
+
+@router.post("/{kb_id}/url")
+async def upload_url(
+    kb_id: str, 
+    request: UrlUploadRequest,
+    user_id: str = Depends(get_current_user_id)
+):
+    """Scrape a URL, extract text, and add it to the knowledge base."""
+    # Verify KB ownership
+    kb = db.get_knowledge_base(kb_id)
+    if not kb or kb["user_id"] != user_id:
+        raise HTTPException(status_code=404, detail="Knowledge base not found")
+
+    import requests
+    from urllib.parse import urlparse
+
+    try:
+        # Use Jina Reader API to properly scrape SPAs, extract main text, and convert to Markdown
+        jina_url = f"https://r.jina.ai/{request.url}"
+        response = requests.get(jina_url, timeout=15)
+        response.raise_for_status()
+        
+        text = response.text
+
+        if not text.strip() or "Markdown Content" not in text:
+            # Fallback if Jina couldn't read it
+            if len(text) < 50:
+                raise HTTPException(status_code=400, detail="Could not extract any text from this URL.")
+
+        # Save to file
+        kb_dir = UPLOAD_DIR / kb_id
+        kb_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Create a safe filename from the URL
+        parsed_url = urlparse(request.url)
+        safe_name = parsed_url.netloc + parsed_url.path.replace('/', '_')
+        if not safe_name.endswith('.txt'):
+            safe_name += '.txt'
+            
+        file_path = kb_dir / safe_name
+        file_path.write_text(text, encoding='utf-8')
+        
+        # Size in bytes
+        file_size = len(text.encode('utf-8'))
+
+        # DB Entry
+        doc = db.create_kb_document(
+            kb_id=kb_id,
+            user_id=user_id,
+            filename=request.url, # Show URL as filename
+            file_type="url",
+            file_size=file_size,
+            file_path=str(file_path)
+        )
+        db.update_kb_document_status(doc["id"], "processing")
+        db.update_kb_doc_count(kb_id, delta=1)
+
+        # Kafka Queue
+        from confluent_kafka import Producer
+        import json
+        from config import KAFKA_BOOTSTRAP_SERVERS, KAFKA_TOPIC_DOCUMENT_INDEXING
+
+        producer = Producer({"bootstrap.servers": KAFKA_BOOTSTRAP_SERVERS})
+        
+        payload = {
+            "doc_id": doc["id"],
+            "kb_id": kb_id,
+            "user_id": user_id,
+            "file_path": str(file_path),
+            "filename": request.url,
+        }
+        
+        try:
+            producer.produce(
+                KAFKA_TOPIC_DOCUMENT_INDEXING,
+                key=doc["id"].encode('utf-8'),
+                value=json.dumps(payload).encode('utf-8')
+            )
+            producer.flush()
+            logger.info(f"Queued URL scraping task for {request.url} ({doc['id']})")
+        except Exception as e:
+            logger.error(f"Failed to queue URL scraping task: {e}")
+            db.update_kb_document_status(doc["id"], "error")
+            raise HTTPException(status_code=500, detail="Failed to queue document for processing.")
+
+        from fastapi.responses import JSONResponse
+        return JSONResponse(
+            status_code=202,
+            content={**doc, "status": "processing", "message": "URL queued for background indexing."}
+        )
+    except requests.RequestException as e:
+        logger.error(f"Failed to fetch URL {request.url}: {e}")
+        raise HTTPException(status_code=400, detail=f"Failed to fetch URL: {str(e)}")
+
+
 from pydantic import BaseModel
 
 from pydantic import BaseModel

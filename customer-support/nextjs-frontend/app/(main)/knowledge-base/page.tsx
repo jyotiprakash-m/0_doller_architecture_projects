@@ -14,6 +14,7 @@ export default function KnowledgeBasePage() {
   const [isCreating, setIsCreating] = useState(false);
   const [docsMap, setDocsMap] = useState<Record<string, any[]>>({});
   const [uploadingKbId, setUploadingKbId] = useState<string | null>(null);
+  const [urlInputs, setUrlInputs] = useState<Record<string, string>>({});
   
   // Doc Chat States
   const [chatDoc, setChatDoc] = useState<{kbId: string, doc: any} | null>(null);
@@ -154,6 +155,23 @@ export default function KnowledgeBasePage() {
     }
   };
 
+  const handleScrapeUrl = async (kbId: string) => {
+    const url = urlInputs[kbId];
+    if (!url) return;
+
+    setUploadingKbId(kbId);
+    try {
+      await APIClient.post(`/api/kb/${kbId}/url`, { url });
+      setUrlInputs(prev => ({ ...prev, [kbId]: '' }));
+      fetchDocs(kbId);
+    } catch (error: any) {
+      console.error(error);
+      alert('Failed to scrape URL: ' + (error.message || 'Unknown error'));
+    } finally {
+      setUploadingKbId(null);
+    }
+  };
+
   const handleSendDocChat = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     if (!chatInput.trim() || !chatDoc) return;
@@ -241,29 +259,50 @@ export default function KnowledgeBasePage() {
               <div className="mt-4 border border-slate-700 rounded-lg overflow-hidden bg-slate-900/50">
                 <div className="p-4 border-b border-slate-700 flex justify-between items-center bg-slate-800/50">
                   <h4 className="font-medium text-slate-200 text-sm">Documents</h4>
-                  <div className="relative">
-                    <input
-                      type="file"
-                      id={`file-${kb.id}`}
-                      className="hidden"
-                      accept=".pdf,.txt,.md,.docx"
-                      onChange={(e) => handleUpload(kb.id, e)}
-                    />
-                    <label htmlFor={`file-${kb.id}`}>
-                      <div className={`cursor-pointer inline-flex items-center justify-center rounded-lg font-medium transition-colors border-2 border-emerald-600 text-emerald-500 hover:bg-emerald-600/10 h-8 px-3 text-xs ${uploadingKbId === kb.id ? 'opacity-50 pointer-events-none' : ''}`}>
-                        <span className="flex items-center space-x-2">
-                          {uploadingKbId === kb.id ? (
-                            <svg className="animate-spin h-4 w-4 text-current" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                            </svg>
-                          ) : (
-                            <UploadCloud className="h-4 w-4" />
-                          )}
-                          <span>Upload & Index</span>
-                        </span>
-                      </div>
-                    </label>
+                  <div className="flex items-center space-x-4">
+                    <div className="flex items-center space-x-2">
+                      <Input
+                        placeholder="https://example.com/docs"
+                        className="h-8 text-xs w-48 bg-slate-950 border-slate-700"
+                        value={urlInputs[kb.id] || ''}
+                        onChange={(e) => setUrlInputs(prev => ({ ...prev, [kb.id]: e.target.value }))}
+                        onKeyDown={(e) => e.key === 'Enter' && handleScrapeUrl(kb.id)}
+                        disabled={uploadingKbId === kb.id}
+                      />
+                      <Button 
+                        size="sm" 
+                        variant="secondary" 
+                        className="h-8 text-xs" 
+                        onClick={() => handleScrapeUrl(kb.id)}
+                        disabled={uploadingKbId === kb.id || !urlInputs[kb.id]}
+                      >
+                        Scrape URL
+                      </Button>
+                    </div>
+                    <div className="relative">
+                      <input
+                        type="file"
+                        id={`file-${kb.id}`}
+                        className="hidden"
+                        accept=".pdf,.txt,.md,.docx"
+                        onChange={(e) => handleUpload(kb.id, e)}
+                      />
+                      <label htmlFor={`file-${kb.id}`}>
+                        <div className={`cursor-pointer inline-flex items-center justify-center rounded-lg font-medium transition-colors border-2 border-emerald-600 text-emerald-500 hover:bg-emerald-600/10 h-8 px-3 text-xs ${uploadingKbId === kb.id ? 'opacity-50 pointer-events-none' : ''}`}>
+                          <span className="flex items-center space-x-2">
+                            {uploadingKbId === kb.id ? (
+                              <svg className="animate-spin h-4 w-4 text-current" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                              </svg>
+                            ) : (
+                              <UploadCloud className="h-4 w-4" />
+                            )}
+                            <span>Upload & Index</span>
+                          </span>
+                        </div>
+                      </label>
+                    </div>
                   </div>
                 </div>
                 
@@ -315,7 +354,7 @@ export default function KnowledgeBasePage() {
                             </button>
                           </div>
                         </div>
-                        {doc.status === 'processing' && (
+                        {(doc.status === 'processing' || doc.status === 'uploaded') && (
                           <div className="mt-3 ml-8">
                             <div className="w-full bg-slate-700/50 rounded-full h-1.5 overflow-hidden">
                               <div
