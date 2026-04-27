@@ -141,6 +141,53 @@ async def delete_document(kb_id: str, doc_id: str, user_id: str = Depends(get_cu
     return {"status": "deleted", "doc_id": doc_id}
 
 
+from pydantic import BaseModel
+
+from pydantic import BaseModel
+from typing import List, Dict, Any
+
+class DocChatRequest(BaseModel):
+    question: str
+    chat_history: List[Dict[str, Any]] = []
+
+@router.post("/{kb_id}/documents/{doc_id}/chat")
+async def chat_with_document(
+    kb_id: str, 
+    doc_id: str, 
+    request: DocChatRequest,
+    user_id: str = Depends(get_current_user_id)
+):
+    """Ask a question about a specific document."""
+    # Verify ownership
+    doc = db.get_kb_document(doc_id)
+    if not doc or doc["user_id"] != user_id or doc["kb_id"] != kb_id:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    if doc["status"] != "indexed":
+        raise HTTPException(status_code=400, detail="Document is not fully indexed yet.")
+
+    try:
+        # If there's chat history, append the last few messages for context
+        search_query = request.question
+        if request.chat_history:
+            recent_history = request.chat_history[-2:] # Take last 2 messages (usually user + ai)
+            context_str = " | ".join([f"{msg['role']}: {msg['content']}" for msg in recent_history])
+            search_query = f"Previous conversation context: {context_str}. \n\nNew Question: {request.question}"
+
+        # Strict RAG query against only this document
+        result = rag_engine.query(
+            question=search_query,
+            user_id=user_id,
+            kb_id=kb_id,
+            doc_id=doc_id,
+            top_k=3
+        )
+        return result
+    except Exception as e:
+        logger.error(f"Doc chat error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.delete("/{kb_id}")
 async def delete_kb(kb_id: str, user_id: str = Depends(get_current_user_id)):
     """Delete a knowledge base and all its documents."""

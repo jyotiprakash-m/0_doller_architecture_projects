@@ -18,6 +18,7 @@ from llama_index.core.node_parser import SentenceSplitter, HierarchicalNodeParse
 from llama_index.core.retrievers import AutoMergingRetriever, QueryFusionRetriever
 from llama_index.retrievers.bm25 import BM25Retriever
 from llama_index.core.postprocessor import LLMRerank
+from llama_index.core.query_engine import RetrieverQueryEngine
 from llama_index.vector_stores.chroma import ChromaVectorStore
 from llama_index.llms.ollama import Ollama
 from llama_index.embeddings.ollama import OllamaEmbedding
@@ -204,10 +205,10 @@ class RAGEngine:
         return len(leaf_nodes)
 
     def query(self, question: str, user_id: str, kb_id: str = None,
-              top_k: int = 5) -> dict:
+              doc_id: str = None, top_k: int = 5) -> dict:
         """
         Query the RAG pipeline. Returns answer with source citations.
-        Filtered by user_id and optionally by kb_id.
+        Filtered by user_id, optionally by kb_id, and strictly by doc_id.
         """
         if not self._initialized:
             self.initialize()
@@ -216,29 +217,36 @@ class RAGEngine:
         filters = [ExactMatchFilter(key="user_id", value=user_id)]
         if kb_id:
             filters.append(ExactMatchFilter(key="kb_id", value=kb_id))
+        if doc_id:
+            filters.append(ExactMatchFilter(key="app_doc_id", value=doc_id))
 
         metadata_filters = MetadataFilters(filters=filters)
 
         logger.info(f"Advanced RAG query with Hybrid Search and Reranking")
 
-        # Point 1: Auto-merging retriever (Parent context)
+        # Point 1: Base retriever
         base_retriever = self._index.as_retriever(
             similarity_top_k=top_k * 2,
             filters=metadata_filters,
-        )
-        retriever = AutoMergingRetriever(
-            base_retriever, self._index.storage_context, verbose=True
         )
 
         # Point 4: Hybrid Search (BM25)
         # Note: In a production app, we'd persist the BM25 index. 
         # For this MVP, we create a temporary BM25 retriever from the top-K nodes for speed.
-        all_nodes = retriever.retrieve(question)
-        bm25_retriever = BM25Retriever.from_defaults(nodes=all_nodes, similarity_top_k=top_k)
+        all_nodes = base_retriever.retrieve(question)
+        
+        if not all_nodes:
+            return {
+                "answer": "I couldn't find relevant information in this document.",
+                "sources": []
+            }
+            
+        actual_nodes = [n.node for n in all_nodes]
+        bm25_retriever = BM25Retriever.from_defaults(nodes=actual_nodes, similarity_top_k=top_k)
 
         # Fusion
         fusion_retriever = QueryFusionRetriever(
-            [retriever, bm25_retriever],
+            [base_retriever, bm25_retriever],
             similarity_top_k=top_k,
             num_queries=1,  # set to 1 to avoid query generation overhead for now
             mode="reciprocal_rerank",
@@ -248,7 +256,7 @@ class RAGEngine:
         # Point 2: LLM Reranking (Local Ollama)
         reranker = LLMRerank(choice_batch_size=5, top_n=3)
 
-        query_engine = self._index.as_query_engine(
+        query_engine = RetrieverQueryEngine.from_args(
             retriever=fusion_retriever,
             node_postprocessors=[reranker],
             response_mode="tree_summarize",
@@ -287,11 +295,10 @@ class RAGEngine:
             ) if sources else None,
         }
 
-    def get_context(self, question: str, user_id: str, kb_id: str = None,
-                    top_k: int = 3) -> str:
+    def get_context(self, question: str, user_id: str, kb_id: str = None, doc_id: str = None, top_k: int = 5) -> str:
         """
-        Retrieve raw context chunks from the knowledge base without LLM generation.
-        Used by agents to get company knowledge for persona grounding.
+        Only retrieve context, without generating a final LLM answer.
+        Used by the LangGraph agent for injecting context into its own prompts.
         """
         if not self._initialized:
             self.initialize()
@@ -299,28 +306,28 @@ class RAGEngine:
         filters = [ExactMatchFilter(key="user_id", value=user_id)]
         if kb_id:
             filters.append(ExactMatchFilter(key="kb_id", value=kb_id))
+        if doc_id:
+            filters.append(ExactMatchFilter(key="app_doc_id", value=doc_id))
 
         metadata_filters = MetadataFilters(filters=filters)
 
-        # 1. Hierarchical / Auto-merging
+        # 1. Base Retriever
         base_retriever = self._index.as_retriever(
             similarity_top_k=top_k * 2,
             filters=metadata_filters,
         )
-        retriever = AutoMergingRetriever(
-            base_retriever, self._index.storage_context, verbose=False
-        )
 
         # 4. Hybrid (BM25)
-        all_nodes = retriever.retrieve(question)
+        all_nodes = base_retriever.retrieve(question)
         if not all_nodes:
             return "No relevant company knowledge found."
             
-        bm25_retriever = BM25Retriever.from_defaults(nodes=all_nodes, similarity_top_k=top_k)
+        actual_nodes = [n.node for n in all_nodes]
+        bm25_retriever = BM25Retriever.from_defaults(nodes=actual_nodes, similarity_top_k=top_k)
 
         # Fusion
         fusion_retriever = QueryFusionRetriever(
-            [retriever, bm25_retriever],
+            [base_retriever, bm25_retriever],
             similarity_top_k=top_k,
             num_queries=1,
             mode="reciprocal_rerank",

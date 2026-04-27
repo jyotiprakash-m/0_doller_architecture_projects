@@ -5,7 +5,7 @@ import { APIClient } from '@/lib/api';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/Card';
-import { BookOpen, Trash2, UploadCloud, FileText, CheckCircle, Clock, Loader2 } from 'lucide-react';
+import { BookOpen, Trash2, UploadCloud, FileText, CheckCircle, Clock, Loader2, MessageSquare, X, Send } from 'lucide-react';
 
 export default function KnowledgeBasePage() {
   const [kbs, setKbs] = useState<any[]>([]);
@@ -14,6 +14,24 @@ export default function KnowledgeBasePage() {
   const [isCreating, setIsCreating] = useState(false);
   const [docsMap, setDocsMap] = useState<Record<string, any[]>>({});
   const [uploadingKbId, setUploadingKbId] = useState<string | null>(null);
+  
+  // Doc Chat States
+  const [chatDoc, setChatDoc] = useState<{kbId: string, doc: any} | null>(null);
+  const [chatHistory, setChatHistory] = useState<{role: string, content: string}[]>([]);
+  const [chatInput, setChatInput] = useState('');
+  const [isChatting, setIsChatting] = useState(false);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  };
+
+  useEffect(() => {
+    if (chatDoc) {
+      scrollToBottom();
+    }
+  }, [chatHistory, chatDoc]);
+
   const pollingRef = useRef<Record<string, NodeJS.Timeout>>({});
 
   // Cleanup polling intervals on unmount
@@ -126,12 +144,39 @@ export default function KnowledgeBasePage() {
   };
 
   const handleDeleteDoc = async (kbId: string, docId: string) => {
+    if (!confirm('Delete this document?')) return;
     try {
       await APIClient.delete(`/api/kb/${kbId}/documents/${docId}`);
       fetchDocs(kbId);
       fetchKbs();
     } catch (e) {
       console.error(e);
+    }
+  };
+
+  const handleSendDocChat = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!chatInput.trim() || !chatDoc) return;
+
+    const userMsg = chatInput.trim();
+    setChatInput('');
+    setChatHistory(prev => [...prev, { role: 'user', content: userMsg }]);
+    setIsChatting(true);
+
+    try {
+      const response = await APIClient.post<any>(
+        `/api/kb/${chatDoc.kbId}/documents/${chatDoc.doc.id}/chat`,
+        { 
+          question: userMsg,
+          chat_history: chatHistory
+        }
+      );
+      setChatHistory(prev => [...prev, { role: 'ai', content: response.answer || response }]);
+    } catch (e) {
+      console.error(e);
+      setChatHistory(prev => [...prev, { role: 'ai', content: 'Sorry, I encountered an error while analyzing this document.' }]);
+    } finally {
+      setIsChatting(false);
     }
   };
 
@@ -248,12 +293,27 @@ export default function KnowledgeBasePage() {
                               </div>
                             </div>
                           </div>
-                          <button
-                            onClick={() => handleDeleteDoc(kb.id, doc.id)}
-                            className="p-2 text-slate-500 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </button>
+                          <div className="flex items-center space-x-1">
+                            {doc.status === 'indexed' && (
+                              <button
+                                onClick={() => {
+                                  setChatDoc({ kbId: kb.id, doc });
+                                  setChatHistory([{ role: 'ai', content: `Hi! I've analyzed **${doc.filename}**. What would you like to know about it?` }]);
+                                }}
+                                className="p-2 text-slate-500 hover:text-indigo-400 hover:bg-indigo-500/10 rounded-lg transition-colors"
+                                title="Chat with Document"
+                              >
+                                <MessageSquare className="h-4 w-4" />
+                              </button>
+                            )}
+                            <button
+                              onClick={() => handleDeleteDoc(kb.id, doc.id)}
+                              className="p-2 text-slate-500 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors"
+                              title="Delete Document"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          </div>
                         </div>
                         {doc.status === 'processing' && (
                           <div className="mt-3 ml-8">
@@ -280,6 +340,68 @@ export default function KnowledgeBasePage() {
           </Card>
         ))}
       </div>
+
+      {/* Right-side Sliding Drawer for Doc Chat */}
+      <div 
+        className={`fixed top-0 right-0 h-full w-96 bg-slate-900 border-l border-slate-800 shadow-2xl transform transition-transform duration-300 ease-in-out z-50 flex flex-col ${chatDoc ? 'translate-x-0' : 'translate-x-full'}`}
+      >
+        <div className="p-4 border-b border-slate-800 flex items-center justify-between bg-slate-900/50">
+          <div>
+            <h3 className="font-semibold text-slate-200 flex items-center">
+              <FileText className="w-4 h-4 mr-2 text-indigo-400" />
+              Document Chat
+            </h3>
+            <p className="text-xs text-slate-500 mt-1 truncate max-w-[250px]" title={chatDoc?.doc?.filename}>
+              {chatDoc?.doc?.filename}
+            </p>
+          </div>
+          <button 
+            onClick={() => setChatDoc(null)}
+            className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition-colors"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-slate-950/50">
+          {chatHistory.map((msg, i) => (
+            <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+              <div className={`max-w-[85%] rounded-2xl px-4 py-2 text-sm ${
+                msg.role === 'user' 
+                  ? 'bg-indigo-600 text-white rounded-br-none' 
+                  : 'bg-slate-800 text-slate-200 rounded-bl-none'
+              }`}>
+                {msg.content}
+              </div>
+            </div>
+          ))}
+          {isChatting && (
+            <div className="flex justify-start">
+              <div className="bg-slate-800 text-slate-400 rounded-2xl rounded-bl-none px-4 py-2 text-sm flex items-center space-x-2">
+                <Loader2 className="w-4 h-4 animate-spin" />
+                <span>AI is thinking...</span>
+              </div>
+            </div>
+          )}
+          <div ref={messagesEndRef} />
+        </div>
+
+        <div className="p-4 border-t border-slate-800 bg-slate-900">
+          <form onSubmit={handleSendDocChat} className="flex space-x-2">
+            <Input
+              value={chatInput}
+              onChange={e => setChatInput(e.target.value)}
+              placeholder="Ask about this document..."
+              disabled={isChatting}
+              className="flex-1 bg-slate-950 border-slate-800"
+            />
+            <Button type="submit" disabled={isChatting || !chatInput.trim()} size="sm" className="bg-indigo-600 hover:bg-indigo-700 text-white shrink-0 mt-1">
+              <Send className="w-4 h-4" />
+            </Button>
+          </form>
+        </div>
+      </div>
+
     </div>
   );
 }
