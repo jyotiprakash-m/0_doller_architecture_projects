@@ -157,20 +157,33 @@ async def upload_url(
         raise HTTPException(status_code=404, detail="Knowledge base not found")
 
     import requests
+    from bs4 import BeautifulSoup
     from urllib.parse import urlparse
 
     try:
-        # Use Jina Reader API to properly scrape SPAs, extract main text, and convert to Markdown
-        jina_url = f"https://r.jina.ai/{request.url}"
-        response = requests.get(jina_url, timeout=15)
+        # Pure web scraping with BeautifulSoup
+        headers = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"}
+        response = requests.get(request.url, timeout=15, headers=headers)
         response.raise_for_status()
         
-        text = response.text
+        soup = BeautifulSoup(response.text, 'html.parser')
+        
+        # Remove noise elements
+        for tag in soup(["script", "style", "nav", "footer", "header", "aside", "noscript", "iframe"]):
+            tag.decompose()
+        
+        # Try to find main content area first
+        main = soup.find("main") or soup.find("article") or soup.find("div", {"role": "main"}) or soup.body
+        
+        # Extract text with structure preserved
+        text = main.get_text(separator='\n', strip=True) if main else soup.get_text(separator='\n', strip=True)
+        
+        # Clean up excessive blank lines
+        lines = [line.strip() for line in text.splitlines() if line.strip()]
+        text = '\n'.join(lines)
 
-        if not text.strip() or "Markdown Content" not in text:
-            # Fallback if Jina couldn't read it
-            if len(text) < 50:
-                raise HTTPException(status_code=400, detail="Could not extract any text from this URL.")
+        if not text.strip() or len(text) < 50:
+            raise HTTPException(status_code=400, detail="Could not extract any text from this URL.")
 
         # Save to file
         kb_dir = UPLOAD_DIR / kb_id
@@ -282,6 +295,37 @@ async def chat_with_document(
         return result
     except Exception as e:
         logger.error(f"Doc chat error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/{kb_id}/chat")
+async def chat_with_kb(
+    kb_id: str,
+    request: DocChatRequest,
+    user_id: str = Depends(get_current_user_id)
+):
+    """Chat with all documents in a knowledge base (global chat)."""
+    kb = db.get_knowledge_base(kb_id)
+    if not kb or kb["user_id"] != user_id:
+        raise HTTPException(status_code=404, detail="Knowledge base not found")
+
+    try:
+        search_query = request.question
+        if request.chat_history:
+            recent_history = request.chat_history[-2:]
+            context_str = " | ".join([f"{msg['role']}: {msg['content']}" for msg in recent_history])
+            search_query = f"Previous conversation context: {context_str}. \n\nNew Question: {request.question}"
+
+        # Query across ALL documents in this KB (no doc_id filter)
+        result = rag_engine.query(
+            question=search_query,
+            user_id=user_id,
+            kb_id=kb_id,
+            doc_id=None,
+            top_k=5
+        )
+        return result
+    except Exception as e:
+        logger.error(f"KB chat error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

@@ -18,7 +18,9 @@ export default function KnowledgeBasePage() {
   
   // Doc Chat States
   const [chatDoc, setChatDoc] = useState<{kbId: string, doc: any} | null>(null);
-  const [chatHistory, setChatHistory] = useState<{role: string, content: string}[]>([]);
+  const [chatHistory, setChatHistory] = useState<{role: string, content: string, sources?: any[]}[]>([]);
+  const [expandedSources, setExpandedSources] = useState<Record<string, boolean>>({});
+  const [globalChat, setGlobalChat] = useState<{kbId: string, kbName: string} | null>(null);
   const [chatInput, setChatInput] = useState('');
   const [isChatting, setIsChatting] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -28,10 +30,10 @@ export default function KnowledgeBasePage() {
   };
 
   useEffect(() => {
-    if (chatDoc) {
+    if (chatDoc || globalChat) {
       scrollToBottom();
     }
-  }, [chatHistory, chatDoc]);
+  }, [chatHistory, chatDoc, globalChat]);
 
   const pollingRef = useRef<Record<string, NodeJS.Timeout>>({});
 
@@ -174,7 +176,7 @@ export default function KnowledgeBasePage() {
 
   const handleSendDocChat = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
-    if (!chatInput.trim() || !chatDoc) return;
+    if (!chatInput.trim() || (!chatDoc && !globalChat)) return;
 
     const userMsg = chatInput.trim();
     setChatInput('');
@@ -182,17 +184,22 @@ export default function KnowledgeBasePage() {
     setIsChatting(true);
 
     try {
-      const response = await APIClient.post<any>(
-        `/api/kb/${chatDoc.kbId}/documents/${chatDoc.doc.id}/chat`,
-        { 
-          question: userMsg,
-          chat_history: chatHistory
-        }
-      );
-      setChatHistory(prev => [...prev, { role: 'ai', content: response.answer || response }]);
+      const endpoint = chatDoc
+        ? `/api/kb/${chatDoc.kbId}/documents/${chatDoc.doc.id}/chat`
+        : `/api/kb/${globalChat!.kbId}/chat`;
+
+      const response = await APIClient.post<any>(endpoint, { 
+        question: userMsg,
+        chat_history: chatHistory
+      });
+      setChatHistory(prev => [...prev, { 
+        role: 'ai', 
+        content: response.answer || response,
+        sources: response.sources || []
+      }]);
     } catch (e) {
       console.error(e);
-      setChatHistory(prev => [...prev, { role: 'ai', content: 'Sorry, I encountered an error while analyzing this document.' }]);
+      setChatHistory(prev => [...prev, { role: 'ai', content: 'Sorry, I encountered an error.' }]);
     } finally {
       setIsChatting(false);
     }
@@ -251,9 +258,24 @@ export default function KnowledgeBasePage() {
                   {kb.doc_count || 0} documents · Created {new Date(kb.created_at).toLocaleDateString()}
                 </div>
               </div>
-              <Button variant="danger" size="sm" onClick={() => handleDeleteKb(kb.id)}>
-                <Trash2 className="h-4 w-4" />
-              </Button>
+              <div className="flex items-center space-x-2">
+                <Button 
+                  size="sm" 
+                  className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs"
+                  onClick={() => {
+                    setChatDoc(null);
+                    setGlobalChat({ kbId: kb.id, kbName: kb.name });
+                    setChatHistory([{ role: 'ai', content: `Hi! I have access to all **${kb.doc_count || 0} documents** in **${kb.name}**. Ask me anything across the entire knowledge base!` }]);
+                    setExpandedSources({});
+                  }}
+                  disabled={!kb.doc_count}
+                >
+                  <MessageSquare className="h-3.5 w-3.5 mr-1.5" /> Chat with KB
+                </Button>
+                <Button variant="danger" size="sm" onClick={() => handleDeleteKb(kb.id)}>
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              </div>
             </CardHeader>
             <CardContent>
               <div className="mt-4 border border-slate-700 rounded-lg overflow-hidden bg-slate-900/50">
@@ -336,8 +358,10 @@ export default function KnowledgeBasePage() {
                             {doc.status === 'indexed' && (
                               <button
                                 onClick={() => {
+                                  setGlobalChat(null);
                                   setChatDoc({ kbId: kb.id, doc });
                                   setChatHistory([{ role: 'ai', content: `Hi! I've analyzed **${doc.filename}**. What would you like to know about it?` }]);
+                                  setExpandedSources({});
                                 }}
                                 className="p-2 text-slate-500 hover:text-indigo-400 hover:bg-indigo-500/10 rounded-lg transition-colors"
                                 title="Chat with Document"
@@ -380,22 +404,25 @@ export default function KnowledgeBasePage() {
         ))}
       </div>
 
-      {/* Right-side Sliding Drawer for Doc Chat */}
+      {/* Right-side Sliding Drawer for Chat */}
       <div 
-        className={`fixed top-0 right-0 h-full w-96 bg-slate-900 border-l border-slate-800 shadow-2xl transform transition-transform duration-300 ease-in-out z-50 flex flex-col ${chatDoc ? 'translate-x-0' : 'translate-x-full'}`}
+        className={`fixed top-0 right-0 h-full w-96 bg-slate-900 border-l border-slate-800 shadow-2xl transform transition-transform duration-300 ease-in-out z-50 flex flex-col ${(chatDoc || globalChat) ? 'translate-x-0' : 'translate-x-full'}`}
       >
         <div className="p-4 border-b border-slate-800 flex items-center justify-between bg-slate-900/50">
           <div>
             <h3 className="font-semibold text-slate-200 flex items-center">
-              <FileText className="w-4 h-4 mr-2 text-indigo-400" />
-              Document Chat
+              {globalChat ? (
+                <><BookOpen className="w-4 h-4 mr-2 text-emerald-400" /> Knowledge Base Chat</>
+              ) : (
+                <><FileText className="w-4 h-4 mr-2 text-indigo-400" /> Document Chat</>
+              )}
             </h3>
-            <p className="text-xs text-slate-500 mt-1 truncate max-w-[250px]" title={chatDoc?.doc?.filename}>
-              {chatDoc?.doc?.filename}
+            <p className="text-xs text-slate-500 mt-1 truncate max-w-[250px]" title={globalChat ? globalChat.kbName : chatDoc?.doc?.filename}>
+              {globalChat ? globalChat.kbName : chatDoc?.doc?.filename}
             </p>
           </div>
           <button 
-            onClick={() => setChatDoc(null)}
+            onClick={() => { setChatDoc(null); setGlobalChat(null); }}
             className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition-colors"
           >
             <X className="w-5 h-5" />
@@ -404,7 +431,7 @@ export default function KnowledgeBasePage() {
 
         <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-slate-950/50">
           {chatHistory.map((msg, i) => (
-            <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+            <div key={i} className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
               <div className={`max-w-[85%] rounded-2xl px-4 py-2 text-sm ${
                 msg.role === 'user' 
                   ? 'bg-indigo-600 text-white rounded-br-none' 
@@ -412,6 +439,42 @@ export default function KnowledgeBasePage() {
               }`}>
                 {msg.content}
               </div>
+              {/* Citation Badges */}
+              {msg.role === 'ai' && msg.sources && msg.sources.length > 0 && (
+                <div className="mt-2 max-w-[85%]">
+                  <div className="flex flex-wrap gap-1.5">
+                    {msg.sources.map((src: any, si: number) => (
+                      <button
+                        key={si}
+                        onClick={() => setExpandedSources(prev => ({ ...prev, [`${i}-${si}`]: !prev[`${i}-${si}`] }))}
+                        className={`inline-flex items-center text-[10px] px-2 py-1 rounded-full border transition-all cursor-pointer ${
+                          expandedSources[`${i}-${si}`]
+                            ? 'bg-indigo-500/20 border-indigo-500/50 text-indigo-300'
+                            : 'bg-slate-800/60 border-slate-700 text-slate-400 hover:border-indigo-500/40 hover:text-indigo-300'
+                        }`}
+                      >
+                        📄 Source {si + 1}{src.score ? ` · ${(src.score * 100).toFixed(0)}%` : ''}
+                      </button>
+                    ))}
+                  </div>
+                  {/* Expanded Source Detail */}
+                  {msg.sources.map((src: any, si: number) => (
+                    expandedSources[`${i}-${si}`] && (
+                      <div key={`detail-${si}`} className="mt-2 p-3 bg-slate-800/80 border border-slate-700 rounded-lg text-xs">
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="text-indigo-400 font-medium truncate max-w-[200px]" title={src.filename}>
+                            📄 {src.filename?.length > 30 ? src.filename.slice(0, 30) + '...' : src.filename}
+                          </span>
+                          {src.score && <span className="text-slate-500">Score: {(src.score * 100).toFixed(1)}%</span>}
+                        </div>
+                        <p className="text-slate-300 leading-relaxed whitespace-pre-wrap border-l-2 border-indigo-500/30 pl-3">
+                          {src.text}
+                        </p>
+                      </div>
+                    )
+                  ))}
+                </div>
+              )}
             </div>
           ))}
           {isChatting && (

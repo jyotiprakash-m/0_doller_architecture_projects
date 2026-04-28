@@ -220,8 +220,11 @@ async def agent_respond(session_id: str, req: AgentResponseRequest,
     }
 
 
-@router.get("/{session_id}/suggestions")
-async def get_ai_suggestions(session_id: str, user_id: str = Depends(get_current_user_id)):
+class SuggestionRequest(BaseModel):
+    selected_doc_ids: list[str] = []
+
+@router.post("/{session_id}/suggestions")
+async def get_ai_suggestions(session_id: str, request: SuggestionRequest = SuggestionRequest(), user_id: str = Depends(get_current_user_id)):
     """Generate 3 AI suggested responses based on KB context."""
     session = db.get_training_session(session_id)
     if not session or session["user_id"] != user_id:
@@ -234,7 +237,8 @@ async def get_ai_suggestions(session_id: str, user_id: str = Depends(get_current
 
     result = orchestrator.generate_suggestions(
         scenario=scenario, messages=messages,
-        user_id=user_id, kb_id=scenario.get("kb_id")
+        user_id=user_id, kb_id=scenario.get("kb_id"),
+        selected_doc_ids=request.selected_doc_ids
     )
 
     return {"suggestions": result["suggestions"], "context": result["context"]}

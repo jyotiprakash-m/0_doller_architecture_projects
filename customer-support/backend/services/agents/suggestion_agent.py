@@ -75,8 +75,8 @@ class SuggestionAgent:
             for s in suggestions:
                 message = s.get("message", "I am looking into this right now.")
                 if isinstance(message, dict):
-                    # Handle hallucinated objects like {"text": "...", "body": "..."}
-                    message = message.get("text") or message.get("body") or message.get("content") or message.get("message") or str(message)
+                    # Handle hallucinated objects like {"responseText": "...", "tone": "..."}
+                    message = message.get("responseText") or message.get("text") or message.get("body") or message.get("content") or message.get("message") or str(message)
                 elif not isinstance(message, str):
                     message = str(message)
 

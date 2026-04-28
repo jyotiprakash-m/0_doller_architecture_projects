@@ -109,15 +109,15 @@ class AgentOrchestrator:
         return feedback
 
     def generate_suggestions(self, scenario: dict, messages: list[dict],
-                             user_id: str, kb_id: str = None) -> list[dict]:
+                             user_id: str, kb_id: str = None, selected_doc_ids: list[str] = None) -> list[dict]:
         """Generate 3 suggested replies for the executive based on KB context."""
         company_context = ""
-        if kb_id:
+        if kb_id or selected_doc_ids:
             # Query the latest customer message against the RAG
             last_msg = messages[-1]["content"] if messages else scenario.get("issue_description", "")
             company_context = rag_engine.get_context(
                 f"How to respond to: {last_msg}",
-                user_id=user_id, kb_id=kb_id, top_k=3,
+                user_id=user_id, kb_id=kb_id, doc_ids=selected_doc_ids, top_k=3,
             )
         
         suggestions = suggestion_agent.generate_suggestions(

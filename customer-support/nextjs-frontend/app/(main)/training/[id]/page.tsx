@@ -6,7 +6,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { APIClient } from '@/lib/api';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
-import { Send, User, Bot, StopCircle, ArrowLeft, Sparkles, Loader2 } from 'lucide-react';
+import { Send, User, Bot, StopCircle, ArrowLeft, Sparkles, Loader2, Database, Folder, File as FileIcon, ChevronRight, ChevronDown, CheckSquare, Square, Search } from 'lucide-react';
 
 export default function TrainingSessionPage({ params }: { params: Promise<{ id: string }> }) {
   const resolvedParams = use(params);
@@ -24,6 +24,13 @@ export default function TrainingSessionPage({ params }: { params: Promise<{ id: 
   const [showContext, setShowContext] = useState(false);
   const [isLoadingSuggestions, setIsLoadingSuggestions] = useState(false);
   
+  // Knowledge Selector States
+  const [knowledgeBases, setKnowledgeBases] = useState<any[]>([]);
+  const [selectedDocIds, setSelectedDocIds] = useState<string[]>([]);
+  const [isSelectorOpen, setIsSelectorOpen] = useState(false);
+  const [expandedKbs, setExpandedKbs] = useState<Record<string, boolean>>({});
+  const [searchQuery, setSearchQuery] = useState('');
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -34,7 +41,28 @@ export default function TrainingSessionPage({ params }: { params: Promise<{ id: 
         setScenario(data.scenario);
       })
       .catch(console.error);
+      
+    APIClient.get<any[]>('/api/kb')
+      .then(async (kbs) => {
+        const kbDocs = await Promise.all(kbs.map(async (kb) => {
+          const docs = await APIClient.get<any[]>(`/api/kb/${kb.id}/documents`);
+          return { ...kb, documents: docs };
+        }));
+        setKnowledgeBases(kbDocs);
+      })
+      .catch(console.error);
   }, [sessionId]);
+
+  // Set initial selected documents to the scenario's KB
+  useEffect(() => {
+    if (scenario && knowledgeBases.length > 0 && selectedDocIds.length === 0) {
+      const scenarioKb = knowledgeBases.find(kb => kb.id === scenario.kb_id);
+      if (scenarioKb && scenarioKb.documents) {
+        setSelectedDocIds(scenarioKb.documents.map((d: any) => d.id));
+        setExpandedKbs({ [scenario.kb_id]: true });
+      }
+    }
+  }, [scenario, knowledgeBases]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -77,7 +105,9 @@ export default function TrainingSessionPage({ params }: { params: Promise<{ id: 
     setSuggestionContext('');
     setShowContext(false);
     try {
-      const result = await APIClient.get<any>(`/api/simulation/${sessionId}/suggestions`);
+      const result = await APIClient.post<any>(`/api/simulation/${sessionId}/suggestions`, {
+        selected_doc_ids: selectedDocIds
+      });
       setSuggestions(result.suggestions || []);
       setSuggestionContext(result.context || '');
     } catch (e: any) {
@@ -112,6 +142,24 @@ export default function TrainingSessionPage({ params }: { params: Promise<{ id: 
 
   const isCompleted = session.status === 'completed';
 
+  const toggleKb = (docs: any[]) => {
+    if (!docs) return;
+    const allDocIds = docs.map(d => d.id);
+    const areAllSelected = allDocIds.every(id => selectedDocIds.includes(id));
+    
+    if (areAllSelected) {
+      setSelectedDocIds(prev => prev.filter(id => !allDocIds.includes(id)));
+    } else {
+      setSelectedDocIds(prev => Array.from(new Set([...prev, ...allDocIds])));
+    }
+  };
+
+  const toggleDoc = (docId: string) => {
+    setSelectedDocIds(prev => 
+      prev.includes(docId) ? prev.filter(id => id !== docId) : [...prev, docId]
+    );
+  };
+
   return (
     <div className="flex flex-col h-[calc(100vh-8rem)]">
       {/* Header */}
@@ -139,6 +187,21 @@ export default function TrainingSessionPage({ params }: { params: Promise<{ id: 
             <span className="text-sm text-slate-300">Mood:</span>
             <span className="text-lg" title={session.current_emotional_state}>{getEmotionEmoji(session.current_emotional_state)}</span>
           </div>
+          
+          <Button 
+            variant="outline" 
+            size="sm" 
+            onClick={() => setIsSelectorOpen(true)}
+            className="border-slate-700 text-slate-300 hover:text-white"
+          >
+            <Database className="h-4 w-4 mr-2 text-indigo-400" /> Sources
+            {selectedDocIds.length > 0 && (
+              <span className="ml-2 bg-indigo-500 text-white text-[10px] px-1.5 py-0.5 rounded-[4px] leading-none">
+                {selectedDocIds.length}
+              </span>
+            )}
+          </Button>
+
           {!isCompleted ? (
             <Button variant="danger" size="sm" onClick={handleEndSession}>
               <StopCircle className="h-4 w-4 mr-2" /> End
@@ -289,6 +352,121 @@ export default function TrainingSessionPage({ params }: { params: Promise<{ id: 
           </Button>
         </form>
       </div>
+
+      {/* Knowledge Selector Drawer */}
+      <AnimatePresence>
+        {isSelectorOpen && (
+          <>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setIsSelectorOpen(false)}
+              className="fixed inset-0 bg-black/50 z-40"
+            />
+            <motion.div
+              initial={{ x: '100%' }}
+              animate={{ x: 0 }}
+              exit={{ x: '100%' }}
+              transition={{ type: 'spring', damping: 25, stiffness: 200 }}
+              className="fixed top-0 right-0 h-full w-80 bg-slate-900 border-l border-slate-800 shadow-2xl z-50 flex flex-col"
+            >
+              <div className="p-4 border-b border-slate-800 flex items-center justify-between">
+                <h3 className="font-semibold text-slate-200 flex items-center">
+                  <Database className="w-4 h-4 mr-2 text-indigo-400" />
+                  Knowledge Sources
+                </h3>
+                <button onClick={() => setIsSelectorOpen(false)} className="text-slate-400 hover:text-white">
+                  &times;
+                </button>
+              </div>
+              <div className="p-4 overflow-y-auto flex-1 space-y-4">
+                <p className="text-xs text-slate-400 mb-2">Select the documents the AI Copilot should use to generate suggestions.</p>
+                <div className="relative mb-4">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-500" />
+                  <input
+                    type="text"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    placeholder="Search folders or files..."
+                    className="w-full bg-slate-900 border border-slate-700 rounded-lg pl-9 pr-3 py-2 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-indigo-500 transition-colors"
+                  />
+                </div>
+                {knowledgeBases
+                  .filter(kb => {
+                    if (!searchQuery) return true;
+                    const query = searchQuery.toLowerCase();
+                    const kbMatches = kb.name.toLowerCase().includes(query);
+                    const docMatches = kb.documents?.some((d: any) => d.filename.toLowerCase().includes(query));
+                    return kbMatches || docMatches;
+                  })
+                  .map((kb) => {
+                  const query = searchQuery.toLowerCase();
+                  const kbMatches = !searchQuery || kb.name.toLowerCase().includes(query);
+                  const displayDocs = kbMatches ? kb.documents : (kb.documents?.filter((d: any) => d.filename.toLowerCase().includes(query)) || []);
+                  
+                  const allDocsSelected = displayDocs?.length > 0 && displayDocs.every((d: any) => selectedDocIds.includes(d.id));
+                  const someDocsSelected = displayDocs?.some((d: any) => selectedDocIds.includes(d.id)) && !allDocsSelected;
+                  const isExpanded = expandedKbs[kb.id] !== false || (searchQuery.length > 0 && !kbMatches); // Auto-expand if searching docs
+
+                  return (
+                    <div key={kb.id} className="border border-slate-800 rounded-lg overflow-hidden bg-slate-900/50">
+                      <div className="flex items-center p-2 hover:bg-slate-800 cursor-pointer">
+                        <button 
+                          onClick={(e) => { e.stopPropagation(); setExpandedKbs(prev => ({...prev, [kb.id]: !isExpanded})); }}
+                          className="p-1 mr-1 text-slate-400 hover:text-white"
+                        >
+                          {isExpanded ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+                        </button>
+                        <button 
+                          onClick={(e) => { e.stopPropagation(); toggleKb(displayDocs || []); }}
+                          className="mr-2 text-indigo-400 hover:text-indigo-300"
+                        >
+                          {allDocsSelected ? <CheckSquare className="w-4 h-4" /> : 
+                           someDocsSelected ? <span className="w-4 h-4 flex items-center justify-center border border-indigo-400 rounded-[3px] bg-indigo-400/20"><span className="w-2 h-2 bg-indigo-400" /></span> : 
+                           <Square className="w-4 h-4 opacity-50" />}
+                        </button>
+                        <Folder className="w-4 h-4 mr-2 text-amber-400" />
+                        <span className="text-sm text-slate-300 truncate font-medium select-none" onClick={() => setExpandedKbs(prev => ({...prev, [kb.id]: !isExpanded}))}>{kb.name}</span>
+                      </div>
+                      
+                      <AnimatePresence>
+                        {isExpanded && displayDocs && (
+                          <motion.div
+                            initial={{ height: 0, opacity: 0 }}
+                            animate={{ height: 'auto', opacity: 1 }}
+                            exit={{ height: 0, opacity: 0 }}
+                            className="overflow-hidden"
+                          >
+                            <div className="pl-9 pr-2 pb-2 space-y-1">
+                              {displayDocs.length === 0 ? (
+                                <div className="text-xs text-slate-500 py-1">No documents</div>
+                              ) : (
+                                displayDocs.map((doc: any) => {
+                                  const isSelected = selectedDocIds.includes(doc.id);
+                                  return (
+                                    <div key={doc.id} className="flex items-center py-1 hover:bg-slate-800 rounded px-1 cursor-pointer" onClick={() => toggleDoc(doc.id)}>
+                                      <button className="mr-2 text-indigo-400">
+                                        {isSelected ? <CheckSquare className="w-3.5 h-3.5" /> : <Square className="w-3.5 h-3.5 opacity-50" />}
+                                      </button>
+                                      <FileIcon className="w-3.5 h-3.5 mr-2 text-slate-400" />
+                                      <span className="text-xs text-slate-400 truncate select-none" title={doc.filename}>{doc.filename}</span>
+                                    </div>
+                                  );
+                                })
+                              )}
+                            </div>
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
+                    </div>
+                  );
+                })}
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

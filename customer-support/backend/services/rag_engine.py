@@ -13,7 +13,7 @@ from llama_index.core import (
     Settings,
     StorageContext,
 )
-from llama_index.core.vector_stores import MetadataFilters, ExactMatchFilter
+from llama_index.core.vector_stores import MetadataFilters, ExactMatchFilter, MetadataFilter, FilterOperator
 from llama_index.core.node_parser import SentenceSplitter, HierarchicalNodeParser, get_leaf_nodes
 from llama_index.core.retrievers import AutoMergingRetriever, QueryFusionRetriever
 from llama_index.retrievers.bm25 import BM25Retriever
@@ -137,8 +137,11 @@ class RAGEngine:
         )
 
         # Step 1: Hierarchical chunking (Small-to-Big)
+        logger.info(f"  Starting hierarchical chunking for {filename}...")
         nodes = self._node_parser.get_nodes_from_documents([document])
         leaf_nodes = get_leaf_nodes(nodes)
+        total_chunks = len(leaf_nodes)
+        logger.info(f"  Chunking complete! Generated {total_chunks} leaf chunks.")
 
         if progress_callback:
             progress_callback(25)
@@ -199,7 +202,9 @@ class RAGEngine:
         if progress_callback:
             progress_callback(90)
 
+        logger.info(f"  Step 3/3: Generating embeddings and inserting {len(leaf_nodes)} chunks into Vector DB...")
         self._index.insert_nodes(leaf_nodes)
+        logger.info("  Vector DB insertion complete!")
 
         logger.info(f"Added KB document '{filename}' ({doc_id}) to KB {kb_id} — {len(leaf_nodes)} leaf nodes indexed.")
         return len(leaf_nodes)
@@ -251,22 +256,19 @@ class RAGEngine:
         actual_nodes = [n.node for n in all_nodes]
         bm25_retriever = BM25Retriever.from_defaults(nodes=actual_nodes, similarity_top_k=top_k)
 
-        # Fusion
+        # Fusion retriever (vector + BM25 hybrid)
         fusion_retriever = QueryFusionRetriever(
             [base_retriever, bm25_retriever],
             similarity_top_k=top_k,
-            num_queries=1,  # set to 1 to avoid query generation overhead for now
+            num_queries=1,
             mode="reciprocal_rerank",
             use_async=False,
         )
 
-        # Point 2: LLM Reranking (Local Ollama)
-        reranker = LLMRerank(choice_batch_size=5, top_n=3)
-
+        # Simple query engine — no LLM reranking (unreliable with small local models)
         query_engine = RetrieverQueryEngine.from_args(
             retriever=fusion_retriever,
-            node_postprocessors=[reranker],
-            response_mode="tree_summarize",
+            response_mode="compact",
             streaming=False,
         )
 
@@ -302,7 +304,7 @@ class RAGEngine:
             ) if sources else None,
         }
 
-    def get_context(self, question: str, user_id: str, kb_id: str = None, doc_id: str = None, top_k: int = 5) -> str:
+    def get_context(self, question: str, user_id: str, kb_id: str = None, doc_ids: list[str] = None, top_k: int = 5) -> str:
         """
         Only retrieve context, without generating a final LLM answer.
         Used by the LangGraph agent for injecting context into its own prompts.
@@ -313,8 +315,11 @@ class RAGEngine:
         filters = [ExactMatchFilter(key="user_id", value=user_id)]
         if kb_id:
             filters.append(ExactMatchFilter(key="kb_id", value=kb_id))
-        if doc_id:
-            filters.append(ExactMatchFilter(key="app_doc_id", value=doc_id))
+        if doc_ids:
+            if len(doc_ids) == 1:
+                filters.append(ExactMatchFilter(key="app_doc_id", value=doc_ids[0]))
+            elif len(doc_ids) > 1:
+                filters.append(MetadataFilter(key="app_doc_id", value=doc_ids, operator=FilterOperator.IN))
 
         metadata_filters = MetadataFilters(filters=filters)
 

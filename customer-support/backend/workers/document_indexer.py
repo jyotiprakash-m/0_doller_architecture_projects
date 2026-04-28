@@ -37,13 +37,14 @@ def process_message(msg_value):
 
         # 1. Extract Text (10% progress)
         db.update_kb_document_progress(doc_id, 10)
-        logger.info(f"Extracting text from {file_path}...")
+        logger.info(f"[{doc_id}] Step 1/3: Extracting text from {file_path}...")
         text, page_count = extract_text(file_path)
+        logger.info(f"[{doc_id}] Step 1/3 Complete: Extracted {page_count} pages of text.")
 
         # 2. Add to RAG Engine — chunking, metadata extraction, and embedding
         # Progress updates happen inside rag_engine.add_document() via callback
         db.update_kb_document_progress(doc_id, 20)
-        logger.info("Sending to RAG Engine for chunking, metadata extraction, and embedding...")
+        logger.info(f"[{doc_id}] Step 2/3: Sending to RAG Engine for chunking & metadata extraction...")
         chunk_count = rag_engine.add_document(
             doc_id=doc_id, 
             user_id=user_id, 
@@ -75,6 +76,7 @@ def main():
         'bootstrap.servers': KAFKA_BOOTSTRAP_SERVERS,
         'group.id': 'document_indexer_group',
         'auto.offset.reset': 'earliest',
+        'enable.auto.commit': False,      # Disable auto-commit to prevent message loss
         'max.poll.interval.ms': 3600000,  # Allow up to 1 hour for local LLM processing
         'session.timeout.ms': 45000       # Keep session alive if poll interval is respected
     }
@@ -106,6 +108,8 @@ def main():
                 # Valid message received
                 logger.info(f"Received task! Offset: {msg.offset()}")
                 process_message(msg.value().decode('utf-8'))
+                # Manually commit offset after processing is complete
+                consumer.commit(msg)
 
     except KeyboardInterrupt:
         logger.info("Worker shutting down gracefully...")
