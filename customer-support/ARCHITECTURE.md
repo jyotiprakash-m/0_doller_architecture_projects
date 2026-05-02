@@ -8,6 +8,16 @@ This document provides a comprehensive overview of the technical architecture, d
 
 SupportSim AI is designed as a local-first, privacy-focused SaaS application. All AI inference is performed locally using Ollama, ensuring zero API costs and complete data privacy.
 
+### Core Features
+
+- **🛡️ Privacy-First AI**: 100% local inference using Ollama (Llama 3.2). No data ever leaves your infrastructure.
+- **📚 Advanced RAG Engine**: Multi-tenant document isolation with hierarchical chunking and metadata-driven retrieval.
+- **🤖 Agentic Orchestration**: Complex multi-agent workflows managed by LangGraph (Customer, Evaluator, and Coach agents).
+- **📨 Async Scalability**: Kafka-backed background processing for robust, high-volume document indexing.
+- **🎭 Dynamic Simulation**: Realistic customer personas with evolving emotional states and real-time Copilot suggestions.
+- **📊 Automated Evaluation**: Granular performance scoring across accuracy, empathy, and resolution metrics.
+- **💳 SaaS Ready**: Full Stripe integration for credit-based usage, automated billing, and secure webhooks.
+
 ### High-Level Architecture
 
 ```mermaid
@@ -18,6 +28,7 @@ graph TD
     classDef datastore fill:#f59e0b,stroke:#d97706,stroke-width:2px,color:#fff
     classDef ai fill:#a855f7,stroke:#7e22ce,stroke-width:2px,color:#fff
     classDef worker fill:#ec4899,stroke:#be185d,stroke-width:2px,color:#fff
+    classDef external fill:#3b82f6,stroke:#1d4ed8,stroke-width:2px,color:#fff
 
     %% Nodes
     Client[Next.js Frontend Client]:::frontend
@@ -28,6 +39,7 @@ graph TD
     Chroma[(ChromaDB Vector Store)]:::datastore
     Ollama[Ollama Local LLM]:::ai
     LangGraph[LangGraph Agent Orchestrator]:::ai
+    Stripe[Stripe Payments API]:::external
 
     %% Connections
     Client <-->|REST API / JWT Auth| API
@@ -41,6 +53,10 @@ graph TD
     API <-->|Coordinate Chat/Eval| LangGraph
     LangGraph <-->|Query Context| Chroma
     LangGraph <-->|Inference| Ollama
+
+    Client --|Checkout Redirection|--> Stripe
+    Stripe --|Webhooks|--> API
+    API --|Create Session|--> Stripe
 ```
 
 ---
@@ -58,8 +74,8 @@ The frontend is built using Next.js 15 (App Router) with Tailwind CSS for stylin
 
 The core backend is a modular FastAPI application running on Python 3.11+.
 
-- **`routers/`**: Exposes REST endpoints grouped by feature (auth, knowledge base, simulation, evaluation, billing).
-- **`services/`**: Contains business logic (`db.py`, `rag_engine.py`, `doc_processor.py`, `auth_utils.py`).
+- **`routers/`**: Exposes REST endpoints grouped by feature (auth, knowledge base, simulation, evaluation, billing/Stripe).
+- **`services/`**: Contains business logic (`db.py`, `rag_engine.py`, `doc_processor.py`, `auth_utils.py`, `billing.py`).
 
 ### Agent Orchestration (LangGraph)
 
@@ -141,6 +157,33 @@ sequenceDiagram
     LangGraph-->>API: Graph State Update
     API-->>NextJS: Return Customer Message
     NextJS-->>User: Render UI
+```
+
+### Billing & Credit Fulfillment Workflow (Stripe)
+
+```mermaid
+sequenceDiagram
+    participant User as 👤 User
+    participant NextJS as 🎨 Frontend #f5f3ff
+    participant API as 🚀 FastAPI #f0fdf4
+    participant Stripe as 💳 Stripe API #eff6ff
+    participant DB as 💾 SQLite #fffbeb
+
+    User->>NextJS: Select Credit Package
+    NextJS->>API: POST /api/billing/create-checkout-session
+    API->>Stripe: Create Checkout Session
+    Stripe-->>API: Return Session URL/ID
+    API-->>NextJS: Return Checkout URL
+    NextJS->>User: Redirect to Stripe Checkout
+
+    User->>Stripe: Complete Payment
+    Stripe-->>User: Redirect back to Dashboard
+
+    Note over Stripe, API: Async Webhook Delivery
+    Stripe->>API: POST /api/billing/webhook (checkout.session.completed)
+    API->>API: Verify Signature & Metadata
+    API->>DB: Update User Credits & Subscription Status
+    API->>DB: Log Transaction
 ```
 
 ---
